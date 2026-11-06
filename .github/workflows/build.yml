@@ -1,0 +1,275 @@
+name: Build Smart Calculator APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.6'
+
+      - name: Create Android project
+        run: |
+          mkdir -p app/src/main/java/com/smartcalc/app
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "SmartCalculator"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.4.1" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.smartcalc.app"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "com.smartcalc.app"
+                  minSdk = 23
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0"
+              }
+
+              buildFeatures {
+                  compose = true
+              }
+
+              composeOptions {
+                  kotlinCompilerExtensionVersion = "1.5.14"
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2024.04.01"))
+              implementation("androidx.activity:activity-compose:1.9.0")
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.ui:ui-graphics")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.compose.ui:ui-tooling-preview")
+              debugImplementation("androidx.compose.ui:ui-tooling")
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:label="Smart Calculator"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/smartcalc/app/MainActivity.kt <<'EOF'
+          package com.smartcalc.app
+
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.shape.RoundedCornerShape
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.style.TextAlign
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+
+          class MainActivity : ComponentActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  setContent { CalculatorScreen() }
+              }
+          }
+
+          @Composable
+          fun CalculatorScreen() {
+              var display by remember { mutableStateOf("0") }
+              var first by remember { mutableStateOf<Double?>(null) }
+              var operator by remember { mutableStateOf<String?>(null) }
+              var newNumber by remember { mutableStateOf(true) }
+
+              val rows = listOf(
+                  listOf("AC", "±", "%", "÷"),
+                  listOf("7", "8", "9", "×"),
+                  listOf("4", "5", "6", "−"),
+                  listOf("1", "2", "3", "+"),
+                  listOf("0", ".", "⌫", "=")
+              )
+
+              fun press(key: String) {
+                  when (key) {
+                      "AC" -> {
+                          display = "0"
+                          first = null
+                          operator = null
+                          newNumber = true
+                      }
+                      "⌫" -> {
+                          if (!newNumber) {
+                              display = if (display.length > 1) display.dropLast(1) else "0"
+                          }
+                      }
+                      "±" -> {
+                          if (display != "0") {
+                              display = if (display.startsWith("-")) display.drop(1) else "-$display"
+                          }
+                      }
+                      "%" -> {
+                          display = ((display.toDoubleOrNull() ?: 0.0) / 100).toString()
+                      }
+                      "+", "−", "×", "÷" -> {
+                          first = display.toDoubleOrNull()
+                          operator = key
+                          newNumber = true
+                      }
+                      "=" -> {
+                          val a = first
+                          val b = display.toDoubleOrNull()
+                          if (a != null && b != null && operator != null) {
+                              val answer = when (operator) {
+                                  "+" -> a + b
+                                  "−" -> a - b
+                                  "×" -> a * b
+                                  "÷" -> if (b != 0.0) a / b else Double.NaN
+                                  else -> b
+                              }
+                              display = if (answer.isNaN() || answer.isInfinite()) "Error"
+                              else answer.toString().removeSuffix(".0")
+                              first = null
+                              operator = null
+                              newNumber = true
+                          }
+                      }
+                      "." -> {
+                          if (newNumber) {
+                              display = "0."
+                              newNumber = false
+                          } else if (!display.contains(".")) {
+                              display += "."
+                          }
+                      }
+                      else -> {
+                          display = if (newNumber || display == "0" || display == "Error") key
+                          else display + key
+                          newNumber = false
+                      }
+                  }
+              }
+
+              Column(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .background(Color(0xFF10131B))
+                      .padding(16.dp),
+                  verticalArrangement = Arrangement.Bottom
+              ) {
+                  Text(
+                      text = display,
+                      color = Color.White,
+                      fontSize = 48.sp,
+                      fontWeight = FontWeight.Bold,
+                      textAlign = TextAlign.End,
+                      modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp)
+                  )
+
+                  rows.forEach { row ->
+                      Row(
+                          modifier = Modifier.fillMaxWidth(),
+                          horizontalArrangement = Arrangement.spacedBy(8.dp)
+                      ) {
+                          row.forEach { key ->
+                              val special = key in listOf("÷", "×", "−", "+", "=")
+                              Button(
+                                  onClick = { press(key) },
+                                  modifier = Modifier.weight(1f).height(68.dp),
+                                  shape = RoundedCornerShape(18.dp),
+                                  colors = ButtonDefaults.buttonColors(
+                                      containerColor = when {
+                                          special -> Color(0xFF536DFE)
+                                          key in listOf("AC", "±", "%", "⌫") -> Color(0xFF303747)
+                                          else -> Color(0xFF1D2431)
+                                      }
+                                  ),
+                                  contentPadding = PaddingValues(0.dp)
+                              ) {
+                                  Text(key, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                              }
+                          }
+                      }
+                      Spacer(Modifier.height(9.dp))
+                  }
+              }
+          }
+          EOF
+
+      - name: Build APK
+        run: gradle assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmartCalculator-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
